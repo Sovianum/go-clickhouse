@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,8 @@ const (
 )
 
 var (
-	textEncode encoder = new(textEncoder)
+	textEncode     encoder = new(textEncoder)
+	timeZoneRegexp         = regexp.MustCompile("\\\\'.+\\\\'")
 )
 
 type encoder interface {
@@ -30,7 +32,8 @@ type textEncoder struct {
 }
 
 type textDecoder struct {
-	location *time.Location
+	location      *time.Location
+	useDBLocation bool
 }
 
 func (e *textEncoder) Encode(value driver.Value) string {
@@ -130,6 +133,35 @@ func (d *textDecoder) Decode(t string, value []byte) (driver.Value, error) {
 	case "String":
 		return unescape(unquote(v)), nil
 	}
+
+	// got zoned datetime
+	if strings.HasPrefix(t, "DateTime") {
+		timeZoneName := timeZoneRegexp.FindString(t)
+		if timeZoneName == "" {
+			return nil, fmt.Errorf("time zone not found")
+		}
+		var (
+			loc *time.Location
+			err error
+		)
+
+		if d.useDBLocation {
+			timeZoneName = timeZoneName[2 : len(timeZoneName)-2] // remove \' in the beginning and in the end
+			loc, err = time.LoadLocation(timeZoneName)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			loc = d.location
+		}
+
+		var t time.Time
+		if t, err = time.ParseInLocation(timeFormat, unquote(v), loc); err != nil {
+			return t, err
+		}
+		return t.In(d.location), nil
+	}
+
 	if strings.HasPrefix(t, "FixedString") {
 		return unescape(unquote(v)), nil
 	}
