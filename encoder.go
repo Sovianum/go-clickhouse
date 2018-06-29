@@ -13,6 +13,7 @@ import (
 const (
 	dateFormat = "2006-01-02"
 	timeFormat = "2006-01-02 15:04:05"
+	timeZoneBorder = "\\'"
 )
 
 var (
@@ -136,17 +137,19 @@ func (d *textDecoder) Decode(t string, value []byte) (driver.Value, error) {
 
 	// got zoned datetime
 	if strings.HasPrefix(t, "DateTime") {
-		timeZoneName := timeZoneRegexp.FindString(t)
-		if timeZoneName == "" {
-			return nil, fmt.Errorf("time zone not found")
-		}
 		var (
 			loc *time.Location
 			err error
 		)
 
 		if d.useDBLocation {
-			timeZoneName = timeZoneName[2 : len(timeZoneName)-2] // remove \' in the beginning and in the end
+			left := strings.Index(t, timeZoneBorder)
+			if left == -1 {
+				return nil, fmt.Errorf("time zone not found")
+			}
+			right := strings.LastIndex(t, timeZoneBorder)
+			timeZoneName := t[left+len(timeZoneBorder):right]
+
 			loc, err = time.LoadLocation(timeZoneName)
 			if err != nil {
 				return nil, err
